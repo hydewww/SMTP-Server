@@ -4,6 +4,19 @@
 #include<stdlib.h>
 #include<string.h>
 #include<WinSock2.h>
+#include <memory.h>
+
+#include<openssl/ssl.h>
+#include<openssl/opensslv.h>
+#include<openssl/x509.h>
+#include<openssl/pem.h>
+#include<openssl/crypto.h>
+#include<openssl/err.h>
+#include<openssl/rsa.h>
+
+#define CERTF "server.crt"
+#define KEYF "server.key"
+#define CACERT "ca.crt"
 
 char mail_from[4096];
 char rcpt_to[5][4096];
@@ -33,17 +46,45 @@ SOCKET Init_ServerSocket() {
     SOCKADDR_IN addrSrv;	//作为服务器端的socket地址
     addrSrv.sin_addr.S_un.S_addr = inet_addr("127.0.0.1");	// Internet address
     addrSrv.sin_family = AF_INET;
-    addrSrv.sin_port = htons(25);  //服务器端端口号
+    addrSrv.sin_port = htons(465);  //服务器端端口号
     bind(sockSrv, (SOCKADDR*)&addrSrv, sizeof(SOCKADDR)); //绑定套接字
     listen(sockSrv, 5); //监听
 
     return sockSrv;
 }
 
+void Init_SSL() {
+	return;
+
+}
+
 void main()
 {
-    SOCKET sockSrv = Init_ServerSocket();
+	SSL_library_init();
+	OpenSSL_add_all_algorithms();
+	SSL_load_error_strings();
 
+	const SSL_METHOD *Smethod = TLSv1_server_method();
+	SSL_CTX *ctx = SSL_CTX_new(Smethod);
+	SSL* ssl = SSL_new(ctx);
+	SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, NULL);
+	SSL_CTX_load_verify_locations(ctx, CACERT, NULL);
+	if (SSL_CTX_use_certificate_file(ctx, CERTF, SSL_FILETYPE_PEM) <= 0) {
+		ERR_print_errors_fp(stderr);
+		exit(3);
+	}
+	if (SSL_CTX_use_PrivateKey_file(ctx, KEYF, SSL_FILETYPE_PEM) <= 0) {
+		ERR_print_errors_fp(stderr);
+		exit(4);
+	}
+
+	if (!SSL_CTX_check_private_key(ctx)) {
+		printf("Private key does not match the certificate public key\n");
+		exit(5);
+	}
+
+    SOCKET sockSrv = Init_ServerSocket();
+	
     SOCKADDR_IN addrClient;  //客户端地址
     int len = sizeof(SOCKADDR);
     char *sendBuf[] = {
@@ -58,31 +99,66 @@ void main()
         "550 Invalid User\r\n" }; //发送标示符
 
     // 启动！
+	X509* client_cert;
+	char* str;
     char tempbuf1[4096] = "";
     while (1)  //等待客户请求
     {
         SOCKET sockConn = accept(sockSrv, (SOCKADDR*)&addrClient, &len); //队列非空则sockSrv抽取第一个链接，否则阻塞调用进程
+		SSL_set_fd(ssl, sockSrv);
+		SSL_accept(ssl);
+
+
+
+
+
+		/*打印所有加密算法的信息(可选)*/
+		printf("SSL connection using %s\n", SSL_get_cipher(ssl));
+
+		/*得到服务端的证书并打印些信息(可选) */
+		client_cert = SSL_get_peer_certificate(ssl);
+		if (client_cert != NULL) {
+			printf("Client certificate:\n");
+
+			str = X509_NAME_oneline(X509_get_subject_name(client_cert), 0, 0);
+			//CHK_NULL(str);
+			printf("\t subject: %s\n", str);
+			//Free(str);
+
+			str = X509_NAME_oneline(X509_get_issuer_name(client_cert), 0, 0);
+			//CHK_NULL(str);
+			printf("\t issuer: %s\n", str);
+			//Free(str);
+
+			X509_free(client_cert);/*如不再需要,需将证书释放 */
+		}
+		else
+			printf("Client does not have certificate.\n");
+
+
+
         FILE *fp;
         fp = fopen("D:\\mail.txt", "w+");
         char recvBuf[4096] = ""; //接收客户端SMTP指令
 
         memset(rcpt_to, 0, sizeof(rcpt_to));//将recp_to用字符'0'替换
-        send(sockConn, sendBuf[0], strlen(sendBuf[0]), 0);  //向已经连接的套接字sockConn发送连接建立信息：220
-
+        //SSL_write(ssl, sendBuf[0], strlen(sendBuf[0]));  //向已经连接的套接字sockConn发送连接建立信息：220
+		SSL_write(ssl, sendBuf[0], strlen(sendBuf[0]));
         //EHLO
-        recv(sockConn, recvBuf, sizeof(recvBuf), 0); //接收数据 EHLO acer-PC
+        //SSL_read(ssl, recvBuf, sizeof(recvBuf)); //接收数据 EHLO acer-PC
+		SSL_read(ssl, recvBuf, sizeof(recvBuf));
         puts(recvBuf);
 
         fprintf(fp, "%s\n", recvBuf); //将数据写入文件
         memset(recvBuf, 0, sizeof(recvBuf)); //将recvBuf前4096个字节用字符'0'替换
-        send(sockConn, sendBuf[1], strlen(sendBuf[1]), 0); // send:250 OK
+        SSL_write(ssl, sendBuf[1], strlen(sendBuf[1])); // send:250 OK
 
         //MAIL FROM
-        recv(sockConn, recvBuf, sizeof(recvBuf), 0); //recv:MAIL FROM:<...>
+        SSL_read(ssl, recvBuf, sizeof(recvBuf)); //recv:MAIL FROM:<...>
         puts(recvBuf);
 
         if (ValidEmail(recvBuf)) { // 错误邮箱
-            send(sockConn, sendBuf[8], strlen(sendBuf[8]), 0);	//send:550
+            SSL_write(ssl, sendBuf[8], strlen(sendBuf[8]));	//send:550
             closesocket(sockConn);
             fclose(fp);
             continue;
@@ -90,14 +166,14 @@ void main()
         memcpy(mail_from, recvBuf, sizeof(recvBuf));	// 记录mail_from[]
         fprintf(fp, "%s\n", recvBuf);
         memset(recvBuf, 0, sizeof(recvBuf));
-        send(sockConn, sendBuf[2], strlen(sendBuf[2]), 0); //send:250 OK
+        SSL_write(ssl, sendBuf[2], strlen(sendBuf[2])); //send:250 OK
 
         //RCPT TO
-        recv(sockConn, recvBuf, sizeof(recvBuf), 0); //recv: RCPT TO:<....>
+        SSL_read(ssl, recvBuf, sizeof(recvBuf)); //recv: RCPT TO:<....>
         puts(recvBuf);
 
         if (ValidEmail(recvBuf)) {
-            send(sockConn, sendBuf[8], strlen(sendBuf[8]), 0);
+            SSL_write(ssl, sendBuf[8], strlen(sendBuf[8]));
             closesocket(sockConn); fclose(fp);
             continue;
         }
@@ -106,9 +182,9 @@ void main()
 
         fprintf(fp, "%s\n", recvBuf);
         memset(recvBuf, 0, sizeof(recvBuf));
-        send(sockConn, sendBuf[2], strlen(sendBuf[2]), 0); //send:250 OK
+        SSL_write(ssl, sendBuf[2], strlen(sendBuf[2])); //send:250 OK
 
-        recv(sockConn, recvBuf, sizeof(recvBuf), 0);//recv:??
+        SSL_read(ssl, recvBuf, sizeof(recvBuf));//recv:??
         puts(recvBuf);
 
         strncpy(tempbuf1, recvBuf, 4);
@@ -116,13 +192,13 @@ void main()
         int i = 1;
         while ((strcmp(tempbuf1, "RCPT") == 0) && (i < 5))
         {
-            if (ValidEmail(recvBuf)) { send(sockConn, sendBuf[8], strlen(sendBuf[8]), 0);	closesocket(sockConn); fclose(fp); continue; }//send:550
+            if (ValidEmail(recvBuf)) { SSL_write(ssl, sendBuf[8], strlen(sendBuf[8]));	closesocket(sockConn); fclose(fp); continue; }//send:550
             memcpy(rcpt_to[i], recvBuf, sizeof(recvBuf));	// 记录rcpt_to[]
             fprintf(fp, "%s\n", recvBuf);
             memset(recvBuf, 0, sizeof(recvBuf));
 
-            send(sockConn, sendBuf[2], strlen(sendBuf[2]), 0); //send:250 OK
-            recv(sockConn, recvBuf, sizeof(recvBuf), 0); //recv: RCPT TO:<....>
+            SSL_write(ssl, sendBuf[2], strlen(sendBuf[2])); //send:250 OK
+            SSL_read(ssl, recvBuf, sizeof(recvBuf)); //recv: RCPT TO:<....>
             strncpy(tempbuf1, recvBuf, 4);
             ++i;
         }
@@ -130,39 +206,42 @@ void main()
         //DATA
         fprintf(fp, "%s\n", recvBuf);
         memset(recvBuf, 0, sizeof(recvBuf));
-        send(sockConn, sendBuf[4], strlen(sendBuf[4]), 0);//send:354 Start mail input;end with <CR><LF>.<CR><LF>\r\n
+        SSL_write(ssl, sendBuf[4], strlen(sendBuf[4]));//send:354 Start mail input;end with <CR><LF>.<CR><LF>\r\n
 
         //real data
-        recv(sockConn, recvBuf, sizeof(recvBuf), 0); //recv:DATA fragment, ...bytes
+        SSL_read(ssl, recvBuf, sizeof(recvBuf)); //recv:DATA fragment, ...bytes
         puts(recvBuf);
 
         memcpy(data, recvBuf, sizeof(recvBuf));	//记录DATA
         fprintf(fp, "%s\n", recvBuf);
         memset(recvBuf, 0, sizeof(recvBuf));
-        send(sockConn, sendBuf[5], strlen(sendBuf[5]), 0); //send:250 OK
+        SSL_write(ssl, sendBuf[5], strlen(sendBuf[5])); //send:250 OK
 
         //邮件格式?
-        recv(sockConn, recvBuf, sizeof(recvBuf), 0); //recv:IMF
+        SSL_read(ssl, recvBuf, sizeof(recvBuf)); //recv:IMF
         puts(recvBuf);
 
         memcpy(imf, recvBuf, sizeof(recvBuf));	//记录imf
         fprintf(fp, "%s\n", recvBuf);
         memset(recvBuf, 0, sizeof(recvBuf));
-        send(sockConn, sendBuf[6], strlen(sendBuf[6]), 0); //send:250 OK
+        SSL_write(ssl, sendBuf[6], strlen(sendBuf[6])); //send:250 OK
 
         //.
-        recv(sockConn, recvBuf, sizeof(recvBuf), 0); //recv: .
+        SSL_read(ssl, recvBuf, sizeof(recvBuf)); //recv: .
         puts(recvBuf);
 
         fprintf(fp, "%s\n", recvBuf);
         memset(recvBuf, 0, sizeof(recvBuf));
-        send(sockConn, sendBuf[7], strlen(sendBuf[7]), 0); //send:QUIT
+        SSL_write(ssl, sendBuf[7], strlen(sendBuf[7])); //send:QUIT
 
         //fprintf(fp, "%s\n", recvBuf);
 
         main_Client(sockConn); //调用客户端函数
 
         closesocket(sockConn); //关闭套接字
+
+		SSL_free(ssl);
+		SSL_CTX_free(ctx);
 
         fclose(fp);  //关闭文件指针
 
