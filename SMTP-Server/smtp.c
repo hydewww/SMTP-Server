@@ -18,10 +18,15 @@
 #define KEYF "server.key"
 #define CACERT "ca.crt"
 
+
+#define CHK_NULL(x) if ((x)==NULL) exit (1)
+#define CHK_ERR(err,s) if ((err)==-1) { perror(s); exit(1); }
+#define CHK_SSL(err) if ((err)==-1) { ERR_print_errors_fp(stderr); exit(2); }
+
 char mail_from[4096];
 char rcpt_to[5][4096];
 char data[4096];
-char imf[4096]; //
+char imf[4096]; 
 
 void main_Client(SOCKET);
 int ValidEmail(char*);
@@ -53,21 +58,14 @@ SOCKET Init_ServerSocket() {
     return sockSrv;
 }
 
-void Init_SSL() {
-	return;
-
-}
-
-void main()
-{
+SSL_CTX *Init_SSL() {
 	SSL_library_init();
 	OpenSSL_add_all_algorithms();
 	SSL_load_error_strings();
 
-	const SSL_METHOD *Smethod = TLSv1_server_method();
+	const SSL_METHOD *Smethod = SSLv23_server_method();
 	SSL_CTX *ctx = SSL_CTX_new(Smethod);
-	SSL* ssl = SSL_new(ctx);
-	SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, NULL);
+	SSL_CTX_set_verify(ctx, 0, NULL);
 	SSL_CTX_load_verify_locations(ctx, CACERT, NULL);
 	if (SSL_CTX_use_certificate_file(ctx, CERTF, SSL_FILETYPE_PEM) <= 0) {
 		ERR_print_errors_fp(stderr);
@@ -82,7 +80,13 @@ void main()
 		printf("Private key does not match the certificate public key\n");
 		exit(5);
 	}
+	
+	return ctx;
+}
 
+void main()
+{
+	SSL_CTX *ctx = Init_SSL();
     SOCKET sockSrv = Init_ServerSocket();
 	
     SOCKADDR_IN addrClient;  //客户端地址
@@ -104,39 +108,24 @@ void main()
     char tempbuf1[4096] = "";
     while (1)  //等待客户请求
     {
-        SOCKET sockConn = accept(sockSrv, (SOCKADDR*)&addrClient, &len); //队列非空则sockSrv抽取第一个链接，否则阻塞调用进程
-		SSL_set_fd(ssl, sockSrv);
+		// 建立socket
+ 		SOCKET sockConn = accept(sockSrv, (SOCKADDR*)&addrClient, &len); //队列非空则sockSrv抽取第一个链接，否则阻塞调用进程
+		//CHK_ERR(sockConn, "accept");
+		//closesocket(sockSrv);
+		/*TCP连接已建立,进行服务端的SSL过程. */
+		printf("Begin server side SSL\n");
+
+		// 建立ssl
+		SSL* ssl = SSL_new(ctx);
+		CHK_NULL(ssl);
+		int err = SSL_set_fd(ssl, sockConn);
 		SSL_accept(ssl);
-
-
-
-
-
+		CHK_SSL(err);
 		/*打印所有加密算法的信息(可选)*/
 		printf("SSL connection using %s\n", SSL_get_cipher(ssl));
+		
 
-		/*得到服务端的证书并打印些信息(可选) */
-		client_cert = SSL_get_peer_certificate(ssl);
-		if (client_cert != NULL) {
-			printf("Client certificate:\n");
-
-			str = X509_NAME_oneline(X509_get_subject_name(client_cert), 0, 0);
-			//CHK_NULL(str);
-			printf("\t subject: %s\n", str);
-			//Free(str);
-
-			str = X509_NAME_oneline(X509_get_issuer_name(client_cert), 0, 0);
-			//CHK_NULL(str);
-			printf("\t issuer: %s\n", str);
-			//Free(str);
-
-			X509_free(client_cert);/*如不再需要,需将证书释放 */
-		}
-		else
-			printf("Client does not have certificate.\n");
-
-
-
+		// 开始传输
         FILE *fp;
         fp = fopen("D:\\mail.txt", "w+");
         char recvBuf[4096] = ""; //接收客户端SMTP指令
@@ -239,13 +228,10 @@ void main()
         main_Client(sockConn); //调用客户端函数
 
         closesocket(sockConn); //关闭套接字
-
 		SSL_free(ssl);
-		SSL_CTX_free(ctx);
-
         fclose(fp);  //关闭文件指针
-
     }
+	SSL_CTX_free(ctx);
     WSACleanup(); //释放分配资源
 }
 
