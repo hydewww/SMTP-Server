@@ -47,9 +47,9 @@ SOCKET Init_ClientSocket(int i);
 void As_Client(SOCKET socketToLocal);
 int Email_OK(char *addr, int type);
 void Get_Address(char* domain);
-void InitFile(char *);
-void SSL_RecAndSendData(char* recBuff, char* sendBuff, SSL* ssl);
-void NO_SSL_RecAndSendData(char* recBuff, char* sendBuff, SOCKET socketToLocal);
+void InitFile(char *, char*);
+void SSL_RecAndSendData(char* recBuff, const char* sendBuff, SSL* ssl);
+void NO_SSL_RecAndSendData(char* recBuff,const char* sendBuff, SOCKET socketToLocal);
 
 
 SOCKET Init_SSL_ServerSocket() { //初始化ssl socket连接
@@ -153,7 +153,7 @@ DWORD WINAPI Ssl_Server(LPVOID lpParameter) //ssl服务器
 
 	SOCKADDR_IN addrClient;  //客户端地址
 	int len = sizeof(SOCKADDR);
-	char *sendBuff[] = {
+	const char *sendBuff[] = {
 		"220 SMTP Ready\r\n",
 		"250 server|250 mail|250 PIPELINING\r\n",
 		"250 OK\r\n",
@@ -163,6 +163,8 @@ DWORD WINAPI Ssl_Server(LPVOID lpParameter) //ssl服务器
 		"250 OK\r\n",
 		"QUIT\r\n",
 		"550 Invalid User\r\n" }; //发送标示符
+	//char* send[1] = { "nidasndk" };
+	char* send[9];
 
 	X509* client_cert;
 	char* str;
@@ -191,20 +193,25 @@ DWORD WINAPI Ssl_Server(LPVOID lpParameter) //ssl服务器
 		FILE *fp;
 
 		char filename[20];
-		InitFile(filename);
+		char dataname[21];
+		InitFile(filename,dataname);
 		fp = fopen(filename, "w+");
 		char recBuff[2048] = ""; //接收客户端SMTP指令
 
 		memset(rcpt_to, 0, sizeof(rcpt_to));//将recp_to用字符'0'替换
 
 		SSL_RecAndSendData(recBuff, sendBuff[0], ssl);//向已经连接的                   套接字socketToLocal发送连接建立信息：220
+		fprintf(fp, "%s\n", sendBuff[0]);
 		fprintf(fp, "%s\n", recBuff); //将数据写入文件
 
 		SSL_RecAndSendData(recBuff, sendBuff[1], ssl);//发送250
+		fprintf(fp, "%s\n", sendBuff[1]);
 		if (Email_OK(recBuff, Mail_From)) { // 错误邮箱
 			SSL_write(ssl, sendBuff[8], strlen(sendBuff[8]));	//send:550
+			fprintf(fp, "%s\n", sendBuff[8]);
 			closesocket(socketToLocal);
 			fclose(fp);
+			printf("Email address wrong\n");
 			continue;
 		}
 		memcpy(mail_from, recBuff, sizeof(recBuff));	// 记录mail_from[]
@@ -212,10 +219,12 @@ DWORD WINAPI Ssl_Server(LPVOID lpParameter) //ssl服务器
 		printf("%s\n", mail_from);
 
 		SSL_RecAndSendData(recBuff, sendBuff[2], ssl);
+		fprintf(fp, "%s\n", sendBuff[2]);
 
 		if (Email_OK(recBuff, RCPT_TO)) {
 			SSL_write(ssl, sendBuff[8], strlen(sendBuff[8]));
 			closesocket(socketToLocal); fclose(fp);
+			printf("Email address wrong\n");
 			continue;
 		}
 		memcpy(rcpt_to[0], recBuff, sizeof(recBuff));	// 记录rcpt_to[]
@@ -223,18 +232,22 @@ DWORD WINAPI Ssl_Server(LPVOID lpParameter) //ssl服务器
 		fprintf(fp, "%s\n", recBuff);
 
 		SSL_RecAndSendData(recBuff, sendBuff[2], ssl);
+		fprintf(fp, "%s\n", sendBuff[2]);
 		strncpy(tmpBuff, recBuff, 4);
 		//RCPT again if exist, up to 5 times
 		int i = 1;
 		while ((strcmp(tmpBuff, "RCPT") == 0) && (i < 5))
 		{
-			if (Email_OK(recBuff, RCPT_TO)) { SSL_write(ssl, sendBuff[8], strlen(sendBuff[8]));	closesocket(socketToLocal); fclose(fp); continue; }//send:550
+			if (Email_OK(recBuff, RCPT_TO)) { SSL_write(ssl, sendBuff[8], strlen(sendBuff[8]));	closesocket(socketToLocal); fclose(fp); 
+			printf("Email address wrong\n"); 
+			continue; }//send:550
 			memcpy(rcpt_to[i], recBuff, sizeof(recBuff));	// 记录rcpt_to[]
 			fprintf(fp, "%s\n", recBuff);
 			memset(recBuff, 0, sizeof(recBuff));
 			n++;
 
 			SSL_write(ssl, sendBuff[2], strlen(sendBuff[2])); //send:250 OK
+			fprintf(fp, "%s\n", sendBuff[2]);
 			SSL_read(ssl, recBuff, sizeof(recBuff)); //recv: RCPT TO:<....>
 			strncpy(tmpBuff, recBuff, 4);
 			++i;
@@ -248,19 +261,29 @@ DWORD WINAPI Ssl_Server(LPVOID lpParameter) //ssl服务器
 		}
 		//DATA
 		SSL_RecAndSendData(recBuff, sendBuff[4], ssl);
+		fprintf(fp, "%s\n", sendBuff[4]);
+		
 		memcpy(data, recBuff, sizeof(recBuff));	//记录DATA
-		fprintf(fp, "%s\n", recBuff);
+		FILE *Fdata = fopen(dataname, "w+");
+		fprintf(Fdata, "%s\n", data);
+		//fprintf(fp, "%s\n", recBuff);
+		//fclose(Fdata);
 		printf("The Length of Mail is :%d\n", strlen(data));
 
 		SSL_RecAndSendData(recBuff, sendBuff[5], ssl);
+		fprintf(fp, "%s\n", sendBuff[5]);
 		memcpy(imf, recBuff, sizeof(recBuff));	//记录imf
 		fprintf(fp, "%s\n", recBuff);
+		fprintf(Fdata, "%s\n", imf);
+		fclose(Fdata);
 
 		SSL_RecAndSendData(recBuff, sendBuff[6], ssl);
+		fprintf(fp, "%s\n", sendBuff[6]);
 		fprintf(fp, "%s\n", recBuff);
 
 		memset(recBuff, 0, sizeof(recBuff));
 		SSL_write(ssl, sendBuff[7], strlen(sendBuff[7])); //send:QUIT
+		fprintf(fp, "%s\n", sendBuff[7]);
 
 		As_Client(socketToLocal); //调用客户端函数
 
@@ -281,7 +304,7 @@ DWORD WINAPI No_Ssl_Server(LPVOID lpParameter)//普通服务器
 
 	SOCKADDR_IN addrClient;  //客户端地址
 	int len = sizeof(SOCKADDR);
-	char *sendBuff[] = {
+	const char *sendBuff[] = {
 		"220 LX's SMTP Ready\r\n",
 		"250 LX's server|250 mail|250 PIPELINING\r\n",
 		"250 OK\r\n",
@@ -301,7 +324,8 @@ DWORD WINAPI No_Ssl_Server(LPVOID lpParameter)//普通服务器
 		n = 0;
 
 		char filename[20];
-		InitFile(filename);
+		char dataname[21];
+		InitFile(filename,dataname);
 		fp = fopen(filename, "w+");
 
 		char recBuff[2048] = ""; //接收客户端SMTP指令
@@ -309,12 +333,15 @@ DWORD WINAPI No_Ssl_Server(LPVOID lpParameter)//普通服务器
 		memset(rcpt_to, 0, sizeof(rcpt_to));//将recp_to用字符'0'替换
 
 		NO_SSL_RecAndSendData(recBuff, sendBuff[0], socketToLocal);
+		fprintf(fp, "%s\n", sendBuff[0]);
 		fprintf(fp, "%s\n", recBuff); //将数据写入文件
 
 		NO_SSL_RecAndSendData(recBuff, sendBuff[1], socketToLocal);
+		fprintf(fp, "%s\n", sendBuff[1]);
 
 		if (Email_OK(recBuff, Mail_From)) { // 错误邮箱
 			send(socketToLocal, sendBuff[8], strlen(sendBuff[8]), 0);	//send:550
+			fprintf(fp, "%s\n", sendBuff[8]);
 			closesocket(socketToLocal);
 			fclose(fp);
 			continue;
@@ -324,10 +351,12 @@ DWORD WINAPI No_Ssl_Server(LPVOID lpParameter)//普通服务器
 		printf("%s\n",mail_from);
 
 		NO_SSL_RecAndSendData(recBuff, sendBuff[2], socketToLocal);
+		fprintf(fp, "%s\n", sendBuff[2]);
 
 		if (Email_OK(recBuff, RCPT_TO)) {
 			send(socketToLocal, sendBuff[8], strlen(sendBuff[8]), 0);
 			closesocket(socketToLocal); fclose(fp);
+			printf("Email address wrong\n");
 			continue;
 		}
 		++n;
@@ -337,13 +366,18 @@ DWORD WINAPI No_Ssl_Server(LPVOID lpParameter)//普通服务器
 		fprintf(fp, "%s\n", recBuff);
 
 		NO_SSL_RecAndSendData(recBuff, sendBuff[2], socketToLocal);
+		fprintf(fp, "%s\n", sendBuff[2]);
 
 		strncpy(tmpBuff, recBuff, 4);
 		//RCPT again if exist, up to 5 times
 		int i = 1;
 		while ((strcmp(tmpBuff, "RCPT") == 0) && (i < 5))
 		{
-			if (Email_OK(recBuff, RCPT_TO)) { send(socketToLocal, sendBuff[8], strlen(sendBuff[8]), 0);	closesocket(socketToLocal); fclose(fp); continue; }//send:550
+			if (Email_OK(recBuff, RCPT_TO)) { send(socketToLocal, sendBuff[8], strlen(sendBuff[8]), 0);
+			printf("Email address wrong\n"); 
+			closesocket(socketToLocal); 
+			fclose(fp);
+			continue; }//send:550
 			memcpy(rcpt_to[i], recBuff, sizeof(recBuff));	// 记录rcpt_to[]
 			fprintf(fp, "%s\n", recBuff);
 			n++;
@@ -351,6 +385,7 @@ DWORD WINAPI No_Ssl_Server(LPVOID lpParameter)//普通服务器
 
 
 			send(socketToLocal, sendBuff[2], strlen(sendBuff[2]), 0); //send:250 OK
+			fprintf(fp, "%s\n", sendBuff[2]);
 			recv(socketToLocal, recBuff, sizeof(recBuff), 0); //recv: RCPT TO:<....>
 			strncpy(tmpBuff, recBuff, 4);
 			++i;
@@ -366,18 +401,29 @@ DWORD WINAPI No_Ssl_Server(LPVOID lpParameter)//普通服务器
 		//DATA
 		fprintf(fp, "%s\n", recBuff);
 		NO_SSL_RecAndSendData(recBuff, sendBuff[4], socketToLocal);
+		fprintf(fp, "%s\n", sendBuff[4]);
 		memcpy(data, recBuff, sizeof(recBuff));	//记录DATA
+		FILE *Fdata = fopen(dataname, "w+");
+		fprintf(Fdata, "%s\n", data);
+		//fprintf(fp, "%s\n", recBuff);
+		//fclose(Fdata);
 		fprintf(fp, "%s\n", recBuff);
 		printf("The Length of Mail is :%d\n", strlen(data));
 
 		NO_SSL_RecAndSendData(recBuff, sendBuff[5], socketToLocal);
+		fprintf(fp, "%s\n", sendBuff[5]);
 		memcpy(imf, recBuff, sizeof(recBuff));	//记录imf
 		fprintf(fp, "%s\n", recBuff);
+		fprintf(Fdata, "%s\n", imf);
+		fclose(Fdata);
+
 
 		NO_SSL_RecAndSendData(recBuff, sendBuff[6], socketToLocal);
+		fprintf(fp, "%s\n", sendBuff[6]);
 		fprintf(fp, "%s\n", recBuff);
 		memset(recBuff, 0, sizeof(recBuff));
 		send(socketToLocal, sendBuff[7], strlen(sendBuff[7]), 0); //send:QUIT
+		fprintf(fp, "%s\n", sendBuff[7]);
 
 																  //fprintf(fp, "%s\n", recBuff);
 
@@ -430,7 +476,7 @@ void As_Client(SOCKET socketToLocal)
 	int i = 0;
 	//SOCKET sockClient = Init_ClientSocket();
 
-	char *sendBuff[] = {
+	const char *sendBuff[] = {
 		"HELO hyde\r\n",
 		"DATA\r\n",
 		"\r\n.\r\n",
@@ -451,7 +497,7 @@ void As_Client(SOCKET socketToLocal)
 		memset(arecBuff, 0, sizeof(arecBuff));
 		send(sockClient, sendBuff[0], strlen(sendBuff[0]), 0); //send:HELO acer_PC
 		recv(sockClient, arecBuff, sizeof(arecBuff), 0);  //recv:250 OK
-		puts(arecBuff);
+		//puts(arecBuff);
 
 		strncpy(tempbuf, arecBuff, 3);
 		if (strcmp(tempbuf, "250") != 0) { send(socketToLocal, arecBuff, strlen(arecBuff), 0); }	//?
@@ -459,7 +505,7 @@ void As_Client(SOCKET socketToLocal)
 		memset(arecBuff, 0, sizeof(arecBuff));
 		send(sockClient, mail_from, strlen(mail_from), 0); //send:MAIL FROM:<...>
 		recv(sockClient, arecBuff, sizeof(arecBuff), 0);  //recv:250 OK
-		puts(arecBuff);
+		//puts(arecBuff);
 
 		strncpy(tempbuf, arecBuff, 3);
 		if (strcmp(tempbuf, "250") != 0) { send(socketToLocal, arecBuff, strlen(arecBuff), 0); }
@@ -468,14 +514,14 @@ void As_Client(SOCKET socketToLocal)
 		send(sockClient, rcpt_to[i], strlen(rcpt_to[i]), 0); //send:RCPT TO:<....>
 		recv(sockClient, arecBuff, sizeof(arecBuff), 0);  //recv:250 OK
 		strncpy(tempbuf, arecBuff, 3);
-		puts(arecBuff);
+		//puts(arecBuff);
 
 		if (strcmp(tempbuf, "250") != 0) { send(socketToLocal, arecBuff, strlen(arecBuff), 0); }
 
 		memset(arecBuff, 0, sizeof(arecBuff));
 		send(sockClient, sendBuff[1], strlen(sendBuff[1]), 0); //send: DATA
 		recv(sockClient, arecBuff, sizeof(arecBuff), 0);  //recv:354
-		puts(arecBuff);
+		//puts(arecBuff);
 		strncpy(tempbuf, arecBuff, 3);
 		if (strcmp(tempbuf, "354") != 0) { send(socketToLocal, arecBuff, strlen(arecBuff), 0); }
 
@@ -489,7 +535,7 @@ void As_Client(SOCKET socketToLocal)
 		memset(arecBuff, 0, sizeof(arecBuff));
 		send(sockClient, sendBuff[2], strlen(sendBuff[2]), 0); //send: .
 		recv(sockClient, arecBuff, sizeof(arecBuff), 0);  //recv:250 OK
-		puts(arecBuff);
+		//puts(arecBuff);
 		strncpy(tempbuf, arecBuff, 3);
 		if (strcmp(tempbuf, "250") != 0) { send(socketToLocal, arecBuff, strlen(arecBuff), 0); }
 
@@ -608,12 +654,18 @@ void Get_Address(char* domain)
 		host = gethostbyname("mx1.qq.com");
 		memcpy(&dest_add[n], host->h_addr_list[0], host->h_length);
 	}
+	else if (strcmp(domain, "sina.com") == 0)
+	{
+		host = gethostbyname("freemx1.sinamail.sina.com.cn");
+		memcpy(&dest_add[n], host->h_addr_list[0], host->h_length);
+	}
 	//memcpy(&dest_add[n], host->h_addr_list[0], host->h_length);
 }
 
-void InitFile(char *filename) {
+void InitFile(char *filename,char* dataname) {
 
 	strcpy(filename, "Log-");
+	strcpy(dataname, "Data-");
 	char time_now[32];
 	time_t time_init;
 	struct tm *localTime;
@@ -624,6 +676,8 @@ void InitFile(char *filename) {
 	strftime(time_now, 24, "%Y%m%d%H%M%S", localTime);
 	strcat(filename, time_now);
 	strcat(filename, ".txt");
+	strcat(dataname, time_now);
+	strcat(dataname, ".txt");
 	memset(time_now, 0, sizeof(time_now));
 	strftime(time_now, 24, "%Y/%m/%d %H:%M:%S", localTime);
 	printf("Time Now is :%s\n", time_now);
@@ -631,13 +685,13 @@ void InitFile(char *filename) {
 
 }
 
-void SSL_RecAndSendData(char* recBuff, char* sendBuff, SSL* ssl) {
+void SSL_RecAndSendData(char* recBuff, const char* sendBuff, SSL* ssl) {
 	memset(recBuff, 0, sizeof(recBuff));
 	SSL_write(ssl, sendBuff, strlen(sendBuff));
 	SSL_read(ssl, recBuff, REC_SIZE);
 }
 
-void NO_SSL_RecAndSendData(char* recBuff, char* sendBuff, SOCKET socketToLocal) {
+void NO_SSL_RecAndSendData(char* recBuff, const char* sendBuff, SOCKET socketToLocal) {
 	memset(recBuff, 0, sizeof(recBuff));
 	send(socketToLocal, sendBuff, strlen(sendBuff), 0);  
 	recv(socketToLocal, recBuff, REC_SIZE, 0); 
