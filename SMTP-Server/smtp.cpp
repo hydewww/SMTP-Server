@@ -74,14 +74,14 @@ SOCKET Init_SSL_ServerSocket() { //初始化ssl socket连接
 	char localHost[256];
 	gethostname(localHost, 256);
 	hostent *pHost = gethostbyname(localHost);
-	memcpy(&addrSrv.sin_addr.S_un.S_addr, pHost->h_addr_list[0], pHost->h_length);
-	//addrSrv.sin_addr.S_un.S_addr = inet_addr("127.0.0.1");	// 本地ip
+	memcpy(&addrSrv.sin_addr.S_un.S_addr, pHost->h_addr_list[2], pHost->h_length);
+	printf("SMTP LocalServer's IP: %s\n", inet_ntoa(addrSrv.sin_addr));
+	addrSrv.sin_addr.S_un.S_addr = inet_addr("0.0.0.0");	// 本地ip
 	addrSrv.sin_family = AF_INET;
 	addrSrv.sin_port = htons(465);  //服务器端端口号
 	bind(sockSrv, (SOCKADDR*)&addrSrv, sizeof(SOCKADDR)); //绑定套接字
 	listen(sockSrv, 5); //监听
 
-	printf("SMTP LocalServer's IP: %s\n", inet_ntoa(addrSrv.sin_addr));
 	printf("SMTP LocalServer's port: %d\n", ntohs(addrSrv.sin_port));
 	return sockSrv;
 }
@@ -107,13 +107,14 @@ SOCKET Init_ServerSocket() {//初始化普通socket连接
 	char localHost[256];
 	gethostname(localHost, 256);
 	hostent *pHost = gethostbyname(localHost);
-	memcpy(&addrSrv.sin_addr.S_un.S_addr, pHost->h_addr_list[0], pHost->h_length);
+	memcpy(&addrSrv.sin_addr.S_un.S_addr, pHost->h_addr_list[2], pHost->h_length);
+	printf("SMTP LocalServer's IP: %s\n", inet_ntoa(addrSrv.sin_addr));
+	addrSrv.sin_addr.S_un.S_addr = inet_addr("0.0.0.0");	// 本地ip
 	addrSrv.sin_family = AF_INET;
 	addrSrv.sin_port = htons(25);  //服务器端端口号
 	bind(sockSrv, (SOCKADDR*)&addrSrv, sizeof(SOCKADDR)); //绑定套接字
 	listen(sockSrv, 5); //监听
 
-	printf("SMTP LocalServer's IP: %s\n", inet_ntoa(addrSrv.sin_addr));
 	printf("SMTP LocalServer's port: %d\n", ntohs(addrSrv.sin_port));
 	return sockSrv;
 }
@@ -305,8 +306,8 @@ DWORD WINAPI No_Ssl_Server(LPVOID lpParameter)//普通服务器
 	SOCKADDR_IN addrClient;  //客户端地址
 	int len = sizeof(SOCKADDR);
 	const char *sendBuff[] = {
-		"220 LX's SMTP Ready\r\n",
-		"250 LX's server|250 mail|250 PIPELINING\r\n",
+		"220 DKY48's SMTP Server\r\n",
+		"250 DKY48's SMTP Ready\r\n",
 		"250 OK\r\n",
 		"250 OK\r\n",
 		"354 Start mail input;end with <CR><LF>.<CR><LF>\r\n",
