@@ -318,7 +318,7 @@ DWORD WINAPI No_Ssl_Server(LPVOID lpParameter)//普通服务器
 		"354 Start mail input;end with <CR><LF>.<CR><LF>\r\n",
 		"250 OK\r\n",
 		"250 OK\r\n",
-		"QUIT\r\n",
+		"221 BYE\r\n",
 		"550 Invalid User\r\n" }; //发送标示符
 
 								  // 启动！
