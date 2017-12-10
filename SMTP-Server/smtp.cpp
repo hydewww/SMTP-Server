@@ -33,6 +33,7 @@ char rcpt_to[5][2048];
 char data[2048];
 char imf[2048];
 char tmpBuff[2048] = "";
+char rcpt_domain[5][20];
 
 unsigned int dest_add[5]; //服务器地址
 int n;//转发数
@@ -645,6 +646,7 @@ void Get_Address(char* domain)
 {
 
 	struct hostent *host;//主机信息
+	memcpy(rcpt_domain[n], domain, strlen(domain));
 	if (strcmp(domain, "bupt.edu.cn") == 0)
 	{
 		host = gethostbyname("mx1.bupt.edu.cn");
@@ -715,5 +717,10 @@ int main()
 	CloseHandle(No_Ssl);
 
 	return 0;
+
+}
+
+void wrong(char* p)
+{
 
 }
