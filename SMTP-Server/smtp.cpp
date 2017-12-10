@@ -258,9 +258,13 @@ DWORD WINAPI Ssl_Server(LPVOID lpParameter) //ssl服务器
 
 		for (int i = 0; i<5; i++) {
 			if (strlen(rcpt_to[i]) != 0) {
-				printf("%s\n", rcpt_to[i]);
+				int n = 0;
+				while (putchar(rcpt_to[i][n]) != '\n') {
+					n++;
+				}
 			}
 		}
+
 		//DATA
 		SSL_RecAndSendData(recBuff, sendBuff[4], ssl);
 		fprintf(fp, "%s\n", sendBuff[4]);
@@ -396,7 +400,10 @@ DWORD WINAPI No_Ssl_Server(LPVOID lpParameter)//普通服务器
 
 		for (int i = 0; i<5; i++) {
 			if (strlen(rcpt_to[i])!=0) {
-				printf("%s\n", rcpt_to[i]);
+				int n = 0;
+				while (putchar(rcpt_to[i][n])!='\n') {
+					n++;
+				}
 			}
 		}
 
@@ -428,6 +435,7 @@ DWORD WINAPI No_Ssl_Server(LPVOID lpParameter)//普通服务器
 		fprintf(fp, "%s\n", sendBuff[7]);
 
 																  //fprintf(fp, "%s\n", recBuff);
+
 
 		As_Client(socketToLocal); //调用客户端函数
 
@@ -717,10 +725,5 @@ int main()
 	CloseHandle(No_Ssl);
 
 	return 0;
-
-}
-
-void wrong(char* p)
-{
 
 }
