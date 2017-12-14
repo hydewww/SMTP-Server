@@ -22,6 +22,7 @@
 #define CACERT "ca.crt"
 #define Mail_From 2
 #define RCPT_TO 3
+#define Mail_error 4
 #define REC_SIZE 1024
 
 #define CHK_NULL(x) if ((x)==NULL) exit (1)
@@ -37,6 +38,7 @@ char rcpt_domain[5][20];
 
 unsigned int dest_add[5]; //服务器地址
 int n;//转发数
+int error_add;
 
 
 SOCKET Init_SSL_ServerSocket();
@@ -47,11 +49,11 @@ DWORD WINAPI No_Ssl_Server(LPVOID lpParameter);
 SOCKET Init_ClientSocket(int i);
 void As_Client(SOCKET socketToLocal);
 int Email_OK(char *addr, int type);
-void Get_Address(char* domain);
+void Get_Address(char* domain,int);
 void InitFile(char *, char*);
 void SSL_RecAndSendData(char* recBuff, const char* sendBuff, SSL* ssl);
 void NO_SSL_RecAndSendData(char* recBuff,const char* sendBuff, SOCKET socketToLocal);
-
+void wrong(char*, int);
 
 SOCKET Init_SSL_ServerSocket() { //初始化ssl socket连接
 								 // 初始化版本
@@ -480,6 +482,40 @@ SOCKET Init_ClientSocket(int i) {
 	printf("SMTP Recive Server's port: %d\n", ntohs(addrClient.sin_port));
 	return sockClient;
 }
+SOCKET Init_ClientSocket_error(int i)
+{
+	// 初始化
+	WORD version = MAKEWORD(2, 2); //WINSOCK2版本
+	WSADATA wsa_errorData;  //储存调用WSAStartup函数返回的Windows Sockets初始化信息
+	int err = WSAStartup(version, &wsa_errorData);  //根据version初始化Winsock服务
+	if (err != 0)   // 初始化失败
+	{
+		exit(1);
+	}
+	if (LOBYTE(wsa_errorData.wVersion) != 2 || HIBYTE(wsa_errorData.wVersion) != 2) //检查socket版本
+	{
+		WSACleanup(); //释放分配资源
+		exit(1);
+	}
+
+	// 创建socket
+	SOCKET sockClient = socket(AF_INET, SOCK_STREAM, 0);
+	SOCKADDR_IN addrClient;
+	addrClient.sin_family = AF_INET;
+	addrClient.sin_port = htons(25);
+	addrClient.sin_addr.S_un.S_addr = error_add;//获得目的Ip地址
+												  //n++;
+
+												  //struct hostent *host;  //主机信息
+												  //host = gethostbyname("mx2.qq.com");
+												  //memcpy(&addrClient.sin_addr.S_un.S_addr, host->h_addr_list[0], host->h_length); //将获取的主机IP地址复制到客户端网络地址.32位无符号IPV4地址
+	connect(sockClient, (SOCKADDR*)&addrClient, sizeof(SOCKADDR));  //连接套接字
+
+
+	//printf("SMTP Recive Server's IP: %s\n", inet_ntoa(addrClient.sin_addr));
+	//printf("SMTP Recive Server's port: %d\n", ntohs(addrClient.sin_port));
+	return sockClient;
+}
 
 void As_Client(SOCKET socketToLocal)
 {
@@ -494,7 +530,7 @@ void As_Client(SOCKET socketToLocal)
 	};
 
 	char arecBuff[256] = "";
-	char tempbuf[3] = "";
+	char tempbuf[4] = "";
 	while ((rcpt_to[i][0] != 0) && (i<5)) //支持多封发送
 	{
 		SOCKET sockClient = Init_ClientSocket(i);
@@ -525,8 +561,16 @@ void As_Client(SOCKET socketToLocal)
 		recv(sockClient, arecBuff, sizeof(arecBuff), 0);  //recv:250 OK
 		strncpy(tempbuf, arecBuff, 3);
 		//puts(arecBuff);
-
-		if (strcmp(tempbuf, "250") != 0) { send(socketToLocal, arecBuff, strlen(arecBuff), 0); }
+		tempbuf[3] = '\0';
+		if (strcmp(tempbuf, "250") != 0)
+		{ 
+			send(socketToLocal, arecBuff, strlen(arecBuff), 0);
+			if (strcmp(tempbuf, "540") == 0 || strcmp(tempbuf, "550") == 0)
+			{
+				wrong(arecBuff,i);
+				continue;
+			}
+		}
 
 		memset(arecBuff, 0, sizeof(arecBuff));
 		send(sockClient, sendBuff[1], strlen(sendBuff[1]), 0); //send: DATA
@@ -620,7 +664,7 @@ int Email_OK(char *addr, int type)
 	{
 		error = 1;
 	}
-	else if (type == RCPT_TO)
+	else if (type == RCPT_TO||type==Mail_From)
 	{
 		int ii = 0;
 		int iii = 0;
@@ -638,8 +682,9 @@ int Email_OK(char *addr, int type)
 
 		//strncpy(domain, addr, sizeof(domain));
 		error = 0;
-		Get_Address(domain);
-		free(domain);
+			Get_Address(domain, type);
+			free(domain);
+		
 		domain = NULL;
 
 	}
@@ -650,27 +695,48 @@ int Email_OK(char *addr, int type)
 	return error;
 }
 
-void Get_Address(char* domain)
+void Get_Address(char* domain,int type)
 {
-
-	struct hostent *host;//主机信息
-	memcpy(rcpt_domain[n], domain, strlen(domain));
-	if (strcmp(domain, "bupt.edu.cn") == 0)
+	if (type != Mail_From)
 	{
-		host = gethostbyname("mx1.bupt.edu.cn");
-		memcpy(&dest_add[n], host->h_addr_list[0], host->h_length);
+		struct hostent *host;//主机信息
+		memcpy(rcpt_domain[n], domain, strlen(domain));
+		if (strcmp(domain, "bupt.edu.cn") == 0)
+		{
+			host = gethostbyname("mx1.bupt.edu.cn");
+			memcpy(&dest_add[n], host->h_addr_list[0], host->h_length);
+		}
+		else if (strcmp(domain, "qq.com") == 0)
+		{
+			host = gethostbyname("mx1.qq.com");
+			memcpy(&dest_add[n], host->h_addr_list[0], host->h_length);
+		}
+		else if (strcmp(domain, "sina.com") == 0)
+		{
+			host = gethostbyname("freemx1.sinamail.sina.com.cn");
+			memcpy(&dest_add[n], host->h_addr_list[0], host->h_length);
+		}
+		//memcpy(&dest_add[n], host->h_addr_list[0], host->h_length);
 	}
-	else if (strcmp(domain, "qq.com") == 0)
+	else if(type==Mail_From)
 	{
-		host = gethostbyname("mx1.qq.com");
-		memcpy(&dest_add[n], host->h_addr_list[0], host->h_length);
+		struct hostent *host;//主机信息
+		if (strcmp(domain, "bupt.edu.cn") == 0)
+		{
+			host = gethostbyname("mx1.bupt.edu.cn");
+			memcpy(&error_add, host->h_addr_list[0], host->h_length);
+		}
+		else if (strcmp(domain, "qq.com") == 0)
+		{
+			host = gethostbyname("mx1.qq.com");
+			memcpy(&error_add, host->h_addr_list[0], host->h_length);
+		}
+		else if (strcmp(domain, "sina.com") == 0)
+		{
+			host = gethostbyname("freemx1.sinamail.sina.com.cn");
+			memcpy(&error_add, host->h_addr_list[0], host->h_length);
+		}
 	}
-	else if (strcmp(domain, "sina.com") == 0)
-	{
-		host = gethostbyname("freemx1.sinamail.sina.com.cn");
-		memcpy(&dest_add[n], host->h_addr_list[0], host->h_length);
-	}
-	//memcpy(&dest_add[n], host->h_addr_list[0], host->h_length);
 }
 
 void InitFile(char *filename,char* dataname) {
@@ -725,5 +791,88 @@ int main()
 	CloseHandle(No_Ssl);
 
 	return 0;
+
+}
+void wrong(char* p,int i)
+{
+	//SOCKET sockClient = Init_ClientSocket();
+
+	const char *sendBuff[] = {
+		"HELO hyde\r\n",
+		"DATA\r\n",
+		"\r\n.\r\n",
+		"QUIT\r\n"
+	};
+
+	char arecBuff[256] = "";
+	char tempbuf[4] = "";
+	char error_data[128] = "subject:";
+	strcat(error_data, p);
+	char error_mailfrom[64] = "MAIL FROM:<Service_help_center@";
+	strcat(error_mailfrom, rcpt_domain[i]);
+	strcat(error_mailfrom, ">\r\n");
+	char error_rcpt_to[64] = "RCPT TO:<";
+	int ii;
+	for (ii = 9; mail_from[ii + 3] != '\n'; ii++)
+	{
+		error_rcpt_to[ii] = mail_from[ii + 3];
+	}
+	error_rcpt_to[ii] = '\n';
+	
+		SOCKET error_sockClient = Init_ClientSocket_error(i);
+
+		memset(tempbuf, 0, sizeof(tempbuf));
+		memset(arecBuff, 0, sizeof(arecBuff));  //初始化arecBuff
+
+		recv(error_sockClient, arecBuff, sizeof(arecBuff), 0);  //recv:220 OK
+
+		memset(arecBuff, 0, sizeof(arecBuff));
+		send(error_sockClient, sendBuff[0], strlen(sendBuff[0]), 0); //send:HELO acer_PC
+		recv(error_sockClient, arecBuff, sizeof(arecBuff), 0);  //recv:250 OK
+														  //puts(arecBuff);
+
+		strncpy(tempbuf, arecBuff, 3);
+		//if (strcmp(tempbuf, "250") != 0) { send(socketToLocal, arecBuff, strlen(arecBuff), 0); }	//?
+
+		memset(arecBuff, 0, sizeof(arecBuff));
+		send(error_sockClient, error_mailfrom, strlen(error_mailfrom), 0); //send:MAIL FROM:<...>
+		recv(error_sockClient, arecBuff, sizeof(arecBuff), 0);  //recv:250 OK
+														  //puts(arecBuff);
+
+		strncpy(tempbuf, arecBuff, 3);
+		//if (strcmp(tempbuf, "250") != 0) { send(socketToLocal, arecBuff, strlen(arecBuff), 0); }
+
+		memset(arecBuff, 0, sizeof(arecBuff));
+		send(error_sockClient, error_rcpt_to, strlen(error_rcpt_to), 0); //send:RCPT TO:<....>
+		recv(error_sockClient, arecBuff, sizeof(arecBuff), 0);  //recv:250 OK
+		strncpy(tempbuf, arecBuff, 3);
+		//puts(arecBuff);
+		tempbuf[3] = '\0';
+
+		memset(arecBuff, 0, sizeof(arecBuff));
+		send(error_sockClient, sendBuff[1], strlen(sendBuff[1]), 0); //send: DATA
+		recv(error_sockClient, arecBuff, sizeof(arecBuff), 0);  //recv:354
+														  //puts(arecBuff);
+		strncpy(tempbuf, arecBuff, 3);
+		//if (strcmp(tempbuf, "354") != 0) { send(socketToLocal, arecBuff, strlen(arecBuff), 0); }
+
+		memset(arecBuff, 0, sizeof(arecBuff));
+		send(error_sockClient, error_data, strlen(error_data), 0);  //send:DATA fragment, ...bytes
+///*
+//		memset(arecBuff, 0, sizeof(arecBuff));
+//		send(erro*/r_sockClient, imf, strlen(imf), 0);  //send:imf fragment
+//
+
+		memset(arecBuff, 0, sizeof(arecBuff));
+		send(error_sockClient, sendBuff[2], strlen(sendBuff[2]), 0); //send: .
+		recv(error_sockClient, arecBuff, sizeof(arecBuff), 0);  //recv:250 OK
+														  //puts(arecBuff);
+		strncpy(tempbuf, arecBuff, 3);
+		//if (strcmp(tempbuf, "250") != 0) { send(socketToLocal, arecBuff, strlen(arecBuff), 0); }
+
+		memset(arecBuff, 0, sizeof(arecBuff));
+		send(error_sockClient, sendBuff[3], strlen(sendBuff[3]), 0); //send: QUIT
+		closesocket(error_sockClient);
+		WSACleanup();
 
 }
